@@ -163,7 +163,7 @@ contract TonClaim with Deployable {
                 response_destination: myAddress(),
                 custom_payload: null,
                 forward_ton_amount: ton("0.01"),
-                forward_payload: emptySlice()
+                forward_payload: beginCell().storeUint(0, 1).endCell().beginParse()
             }.toCell()
         });
 
