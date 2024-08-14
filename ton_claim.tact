@@ -1,6 +1,6 @@
 import "@stdlib/deploy";
 import "./message.tact";
-// import "./jetton.tact";
+
 /**
     Used to claim project tokens purchased in the IDO contract on EVM in the claim contract
     based on the whitelist signed claim amount and claim address eligibility.
@@ -17,14 +17,16 @@ contract TonClaim with Deployable {
 
     project_coin_address: Address;
 
-    projectCoinDecimals: Int as uint8;
-
-    tonDecimals: Int as uint32 = 9;
-
+    // max claims limit
+    // The max limit will be determined based on the actual number of users participating in 
+    // the IDO, and it will not grow indefinitely. It depends on the IDO allocation and the 
+    // number of stakers.
+    const MAX_CLAIMS: Int = 5000; 
     // User claim records
     index: Int as uint32 = 0;    
     claim_record: map<Address, ClaimRecord>;
     claim_list: map<Int, ClaimRecord>;
+    pending_claims: map<Int, Address>;
 
     // Project token balance
     contract_balance: Int as coins = 0;
@@ -41,32 +43,19 @@ contract TonClaim with Deployable {
     // Public key used to verify signatures
     publicKey: Int = 11515758040791894312519273808582344479606047423343319073911177921016049419084;  
 
-    // Logic to prevent reentrancy attacks
-    non_reentrant_lock: Bool = false; 
 
     // Initialize contract
-    init(projectCoinAddress: Address, projectCoinDecimals: Int) {
+    init(projectCoinAddress: Address) {
         
         self.owner =  sender();        
 
         self.project_coin_address = projectCoinAddress;
         self.this_contract_projectCoinWallet = null; // delay set
-        self.projectCoinDecimals = projectCoinDecimals; // default maybe 9
+
     }
 
     // Internal functions ***********************************/
     
-    // Add reentrancy lock
-    fun lockContract() {
-        require(!self.non_reentrant_lock, "Reentrant call detected");
-        self.non_reentrant_lock = true;
-    }
-
-    // Remove reentrancy lock
-    fun unlockContract() {
-        self.non_reentrant_lock = false;
-    }
-
     // Verify the signature of the token claim message parameters
     fun verifySignature(timestamp: Int, claimAmount: Int, claimAddress: Address, signature: Slice): Bool {
         let dataToSign = beginCell()
@@ -83,30 +72,24 @@ contract TonClaim with Deployable {
     receive(msg: SetProjectCoinAddress){
         let ctx: Context = context();
         require(ctx.sender==self.owner,"Only Owner can set this parameter!");
+
+        require(now() < self.claim_time, "set projectcoinaddress and jetton wallet is not allowed after claim time");
         self.project_coin_address = msg.projectCoinAddress;
         self.this_contract_projectCoinWallet = msg.this_contract_wallet;
-        self.projectCoinDecimals = msg.decimals; 
     }
 
-    // Set project token information
-    receive(msg: SetCoinAddress) {
-        let ctx: Context = context();
-        require(ctx.sender == self.owner, "Only Owner can set this parameter!");
-        self.project_coin_address = msg.coinAddress;
-    }
+    // // Set public key for verifying signatures
+    // receive(msg: SetPublicKey) {
+    //     require(sender() == self.owner, "Only owner can set public key");
+    //     self.publicKey = msg.publicKey;
+    // }
 
-    // Set public key for verifying signatures
-    receive(msg: SetPublicKey) {
-        require(sender() == self.owner, "Only owner can set public key");
-        self.publicKey = msg.publicKey;
-    }
-
-    // Set claim time nodes, the same as in the IDO project
-    receive(msg: SetIDOTimes) {
-        require(sender() == self.owner, "Only owner can set times");
-        self.claim_time = msg.claimTime;
-        self.end_time = msg.endTime;
-    }
+    // // Set claim time nodes, the same as in the IDO project
+    // receive(msg: SetIDOTimes) {
+    //     require(sender() == self.owner, "Only owner can set times");
+    //     self.claim_time = msg.claimTime;
+    //     self.end_time = msg.endTime;
+    // }
 
     // Token transfer notification message processing
     receive(ido: TokenNotification) {
@@ -117,31 +100,23 @@ contract TonClaim with Deployable {
 
     // Handle user token claim request
     receive(msg: Claim) {
-        // Lock the contract to prevent reentrancy attacks
-        self.lockContract();
-        // Remove time limit
-        // Ensure call time is after claim time
-        // require(now() >= self.claim_time, "Claiming is not allowed before claim time");
 
         // Ensure enough gas is provided
-        require(context().value >= ton("0.1"), "Not enough value provided for gas");
+        require(context().value >= ton("0.2"), "Not enough value provided for gas");
+        // Ensure the maximum number of claims is not exceeded
+        require(self.index < self.MAX_CLAIMS, "Maximum number of claims reached");
+        // Ensure call time is after claim time
+        require(now() >= self.claim_time, "Claiming is not allowed before claim time");
+        require(now() < self.end_time, "Claiming is not allowed After end time");
 
-        // Verify signature
-        // let claimAddress: Address = msg.claimAddress;
         let claimAmount: Int = msg.claimAmount;
         let timestamp: Int = msg.timestamp;
         let signature: Slice = msg.signature;
 
-        // Verify signature
-        // if (self.verifySignature(timestamp, claimAmount, sender(), signature)) {
-        //     dump("Valid signature");
-        // } else {
-        //     dump("Invalid signature");  
-        // }
-
         require(self.verifySignature(timestamp, claimAmount, sender(), signature), "Invalid received signature");
         dump(claimAmount);
         dump(self.contract_balance);
+
         // Check if the contract balance is sufficient
         require(self.contract_balance >= claimAmount, "Insufficient contract balance");
 
@@ -151,18 +126,23 @@ contract TonClaim with Deployable {
         // Ensure the user has not claimed before, record is empty
         require(userRecord == null, "Have claim record found for this address");
 
+        // 使用当前时间戳作为 queryId
+        let queryId: Int = now();  
+        // 记录正在进行的交易
+        self.pending_claims.set(queryId, sender());
+
         // Execute token transfer
         send(SendParameters{
             to: self.this_contract_projectCoinWallet!!,
             value: ton("0.1"),
-            mode: SendIgnoreErrors,
+            mode: SendRemainingValue,
             body: TokenTransfer{
-                query_id: 0,
+                query_id: queryId,
                 amount: claimAmount,
                 destination: sender,
-                response_destination: myAddress(),
+                response_destination: sender,
                 custom_payload: null,
-                forward_ton_amount: ton("0.01"),
+                forward_ton_amount: 0,
                 forward_payload: beginCell().storeUint(0, 1).endCell().beginParse()
             }.toCell()
         });
@@ -176,7 +156,7 @@ contract TonClaim with Deployable {
             }    
         );
         self.claim_list.set(self.index, self.claim_record.get(sender)!!);
-        self.index = (self.index + 1);
+        self.index += 1;
         
         // Update contract balance
         self.contract_balance -= claimAmount;
@@ -192,53 +172,88 @@ contract TonClaim with Deployable {
             idoTimestamp: now()
         }.toCell());
 
-        // Unlock contract
-        self.unlockContract();
     }
 
-    // Handle admin request to adjust contract balance and correct user claim records
-    // If in a very rare case, the user's claim transfer fails, the admin needs to manually correct the user claim record and adjust the contract balance
-    receive(msg: AdminCorrectRecord) {
-        require(sender() == self.owner, "Only owner can correct balance");
-        
-        self.contract_balance += msg.userAmount;
-        self.ido_claim_amount -= msg.userAmount;
+    // handle other bounced
+    bounced(rawMsg: Slice) {
+        // ...
+    }
 
-        // Update user record to null
-        self.claim_record.set(msg.userClaimAddress, null);
+    // handle tokentransfer bonced msg
+    bounced(msg: bounced<TokenTransfer>) {
+        // Due to the 224-bit limit,get queryId from the original message
+        let queryId: Int = msg.query_id;
 
+        // Retrieve the original sender address
+        let originalSender: Address = self.pending_claims.get(queryId)!!;
+
+        // retrieve amount from claim_record
+        let amount: Int = self.claim_record.get(originalSender)!!.claimedAmount;
+
+        // Restore the state
+        self.contract_balance += amount;
+        self.ido_claim_amount -= amount;
+
+        // Remove the user's claim record and pending claim
+        self.claim_record.set(originalSender, null);
+        self.pending_claims.set(queryId, null);
+
+        // Emit an event notification
         emit(BalanceCorrectionEvent{
-            claim_address: msg.userClaimAddress,
-            jetton_amount: msg.userAmount,
-            action: "corrected",
+            claim_address: originalSender,
+            jetton_amount: amount,
+            action: "claim_bounced",
             timestamp: now()
         }.toCell());
     }
+        
+    // Handle admin request to adjust contract balance and correct user claim records
+    // If in a very rare case, the user's claim transfer fails, the admin needs to manually correct the user claim record and adjust the contract balance
+    // receive(msg: AdminCorrectRecord) {
+    //     require(sender() == self.owner, "Only owner can correct balance");
+        
+    //     self.contract_balance += msg.userAmount;
+    //     self.ido_claim_amount -= msg.userAmount;
+
+    //     // Update user record to null
+    //     self.claim_record.set(msg.userClaimAddress, null);
+
+    //     emit(BalanceCorrectionEvent{
+    //         claim_address: msg.userClaimAddress,
+    //         jetton_amount: msg.userAmount,
+    //         action: "corrected",
+    //         timestamp: now()
+    //     }.toCell());
+    // }
 
     // Handle request to withdraw remaining project tokens (if any) to the project wallet after the IDO ends
     receive(msg: WithdrawFunds) {
+        // Ensure enough gas is provided
+        require(context().value >= ton("0.2"), "Not enough value provided for gas");
         // Check if the caller is the owner
         require(sender() == self.owner, "Only owner can withdraw funds");
 
         // // Check if the IDO has successfully ended
-        // require(now() >= self.end_time, "IDO has not ended yet");
+        require(now() >= self.end_time, "IDO has not ended yet");
         
         // Withdraw all project tokens held by the contract
         let amount_to_send: Int = self.contract_balance;
+        // Update contract balance
+        self.contract_balance = 0;
 
         // Send project tokens to the specified project wallet
         send(SendParameters{
             to: self.this_contract_projectCoinWallet!!,
-            value: 0,
+            value: ton("0.1"),
             mode: (SendRemainingValue + SendIgnoreErrors),
             body: TokenTransfer{
                 query_id: 0,
                 amount: amount_to_send,
                 destination: msg.destination,
-                response_destination: myAddress(),
+                response_destination: sender(),
                 custom_payload: null,
-                forward_ton_amount: ton("0.01"),
-                forward_payload: emptySlice()
+                forward_ton_amount: 0,
+                forward_payload: beginCell().storeUint(0, 1).endCell().beginParse()
             }.toCell()
         });
 
@@ -258,10 +273,7 @@ contract TonClaim with Deployable {
     get fun projectCoin(): Address {
         return self.project_coin_address;
     }
-    // Get project token decimals
-    get fun decimals(): Int {
-        return self.projectCoinDecimals;
-    }
+
     // Get the total claimed amount so far
     get fun claimAmount(): Int {
         return self.ido_claim_amount;
@@ -276,13 +288,10 @@ contract TonClaim with Deployable {
     }
     // Get user's claim information
     get fun userClaimInfo(userAddress: Address): ClaimRecord {
-        // let sender: Address = sender();
         let userRecord: ClaimRecord? = self.claim_record.get(userAddress);
         if (userRecord != null) {
             return userRecord!!;
         }
-        // let record: ClaimRecord = self.claim_record.get(userAddress)!!;
-        // return record;
         return ClaimRecord{
             claimedUserAddress: userAddress,
             claimedAmount: 0,
@@ -298,7 +307,6 @@ contract TonClaim with Deployable {
             contractBalance: self.contract_balance,
             publicKey: self.publicKey,
             projectCoinAddress: self.project_coin_address,
-            projectCoinDecimals: self.projectCoinDecimals,
             endTime: self.end_time,
             claimTime: self.claim_time,
             claimedAmount: self.ido_claim_amount,
