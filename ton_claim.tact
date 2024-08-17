@@ -29,7 +29,7 @@ contract TonClaim with Deployable {
     pending_claims: map<Int, Address>;
 
     // Project token balance
-    contract_balance: Int as coins = 0;
+    // contract_balance: Int as coins = 0;
 
     // Total amount of tokens claimed so far
     ido_claim_amount: Int as coins = 0;
@@ -93,9 +93,11 @@ contract TonClaim with Deployable {
 
     // Token transfer notification message processing
     receive(ido: TokenNotification) {
-        require(sender() == self.this_contract_projectCoinWallet, "Invalid sender");
-        // Update contract balance
-        self.contract_balance += ido.amount;
+        // do nothing
+
+        // require(sender() == self.this_contract_projectCoinWallet, "Invalid sender");
+        // // Update contract balance
+        // self.contract_balance += ido.amount;
     }
 
     // Handle user token claim request
@@ -115,10 +117,9 @@ contract TonClaim with Deployable {
 
         require(self.verifySignature(timestamp, claimAmount, sender(), signature), "Invalid received signature");
         dump(claimAmount);
-        dump(self.contract_balance);
 
         // Check if the contract balance is sufficient
-        require(self.contract_balance >= claimAmount, "Insufficient contract balance");
+        // require(self.contract_balance >= claimAmount, "Insufficient contract balance");
 
         // Get the claim record of the caller sender
         let sender: Address = sender();
@@ -159,7 +160,7 @@ contract TonClaim with Deployable {
         self.index += 1;
         
         // Update contract balance
-        self.contract_balance -= claimAmount;
+        // self.contract_balance -= claimAmount;
         // Update total claimed amount
         self.ido_claim_amount += claimAmount;
 
@@ -191,7 +192,7 @@ contract TonClaim with Deployable {
         let amount: Int = self.claim_record.get(originalSender)!!.claimedAmount;
 
         // Restore the state
-        self.contract_balance += amount;
+        // self.contract_balance += amount;
         self.ido_claim_amount -= amount;
 
         // Remove the user's claim record and pending claim
@@ -237,9 +238,9 @@ contract TonClaim with Deployable {
         require(now() >= self.end_time, "IDO has not ended yet");
         
         // Withdraw all project tokens held by the contract
-        let amount_to_send: Int = self.contract_balance;
+        let amount_to_send: Int = msg.amount; //self.contract_balance;
         // Update contract balance
-        self.contract_balance = 0;
+        // self.contract_balance = 0;
 
         // Send project tokens to the specified project wallet
         send(SendParameters{
@@ -283,9 +284,9 @@ contract TonClaim with Deployable {
         return self.publicKey;
     }
     // Get the project token balance held by the contract, can also be retrieved externally.
-    get fun getContractBalance(): Int {
-        return self.contract_balance;
-    }
+    // get fun getContractBalance(): Int {
+    //     return self.contract_balance;
+    // }
     // Get user's claim information
     get fun userClaimInfo(userAddress: Address): ClaimRecord {
         let userRecord: ClaimRecord? = self.claim_record.get(userAddress);
@@ -304,7 +305,7 @@ contract TonClaim with Deployable {
         return ClaimInfoGet{
             contractOwner: self.owner,
             claimUserCount: self.index,
-            contractBalance: self.contract_balance,
+            // contractBalance: self.contract_balance,
             publicKey: self.publicKey,
             projectCoinAddress: self.project_coin_address,
             endTime: self.end_time,
