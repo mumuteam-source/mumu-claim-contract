@@ -26,7 +26,7 @@ struct ClaimRecord {
 struct ClaimInfoGet {    
     contractOwner: Address;
     claimUserCount: Int as uint32;    
-    contractBalance: Int as coins ;
+    // contractBalance: Int as coins ;
     publicKey: Int;
     projectCoinAddress: Address;
     endTime: Int as uint32;
@@ -88,6 +88,7 @@ message Claim {
 
 message WithdrawFunds {
     destination: Address;
+    amount: Int as coins;
 }
 
 // message TestSignature {
