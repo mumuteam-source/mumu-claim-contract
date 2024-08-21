@@ -18,7 +18,8 @@
 // }
 
 struct ClaimRecord {
-    claimedUserAddress: Address;   //Jetton Master Wallet Address
+    ethAddressInt: Int;           // ETH address as integer
+    claimedTonAddress: Address;   //Jetton Master Wallet Address
     claimedAmount: Int as coins;
     claimedAt: Int as uint32;
 }
@@ -35,6 +36,7 @@ struct ClaimInfoGet {
 }
 
 message TransferEvent {
+    eth_address: Int;
     sender_address: Address;
     jetton_amount: Int as coins;
     ido_action: String;
@@ -43,6 +45,7 @@ message TransferEvent {
 }
 
 message BalanceCorrectionEvent {
+    eth_address: Int;
     claim_address: Address;
     jetton_amount: Int as coins;
     action: String;
@@ -61,8 +64,9 @@ message BalanceCorrectionEvent {
 // }
 
 message Claim {
-    claimAmount: Int as uint64;
+    claimAmount: Int as coins; // change to coins
     timestamp: Int as uint32;
+    ethAddressInt: Int; // add eth address int mapping
     signature: Slice;
 }
 
